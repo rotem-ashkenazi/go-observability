@@ -1,4 +1,4 @@
-module yourorg/telemetry
+module module github.com/rotem-ashkenazi/go-observability
 
 go 1.23.4
 
