@@ -1,4 +1,4 @@
-module module github.com/rotem-ashkenazi/go-observability
+module github.com/rotem-ashkenazi/go-observability/pkg/telemetry
 
 go 1.23.4
 
