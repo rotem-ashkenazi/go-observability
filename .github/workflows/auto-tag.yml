@@ -1,0 +1,120 @@
+name: Auto Tag Version
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [ closed ]
+    branches: [ main ]
+
+jobs:
+  auto-tag:
+    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get latest tag
+      id: get-latest-tag
+      run: |
+        # Get the latest tag, default to v0.0.0 if no tags exist
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        echo "Latest tag: $LATEST_TAG"
+
+    - name: Determine version bump type
+      id: version-bump
+      run: |
+        # Check commit messages to determine bump type
+        COMMITS=$(git log ${{ steps.get-latest-tag.outputs.latest-tag }}..HEAD --oneline)
+        echo "Commits since last tag:"
+        echo "$COMMITS"
+        
+        BUMP_TYPE="patch"
+        
+        # Check for breaking changes (major bump)
+        if echo "$COMMITS" | grep -i "BREAKING CHANGE\|breaking:" || echo "$COMMITS" | grep "!" | grep -E "(feat|fix|chore|docs|style|refactor|perf|test)"; then
+          BUMP_TYPE="major"
+        # Check for new features (minor bump)
+        elif echo "$COMMITS" | grep -i "feat\|feature:"; then
+          BUMP_TYPE="minor"
+        # Default to patch for fixes, chores, etc.
+        fi
+        
+        echo "bump-type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+        echo "Version bump type: $BUMP_TYPE"
+
+    - name: Calculate new version
+      id: new-version
+      run: |
+        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+        BUMP_TYPE="${{ steps.version-bump.outputs.bump-type }}"
+        
+        # Remove 'v' prefix if present
+        VERSION=${LATEST_TAG#v}
+        
+        # Split version into parts
+        IFS='.' read -ra PARTS <<< "$VERSION"
+        MAJOR=${PARTS[0]:-0}
+        MINOR=${PARTS[1]:-0}
+        PATCH=${PARTS[2]:-0}
+        
+        # Bump version based on type
+        case $BUMP_TYPE in
+          major)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+          minor)
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+          patch)
+            PATCH=$((PATCH + 1))
+            ;;
+        esac
+        
+        NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+        echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "New version: $NEW_VERSION"
+
+    - name: Create and push tag
+      run: |
+        NEW_VERSION="${{ steps.new-version.outputs.new-version }}"
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Create annotated tag
+        git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+        
+        # Push tag
+        git push origin "$NEW_VERSION"
+        
+        echo "✅ Created and pushed tag: $NEW_VERSION"
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.new-version.outputs.new-version }}
+        release_name: Release ${{ steps.new-version.outputs.new-version }}
+        body: |
+          ## Changes
+          
+          Automatic release for version ${{ steps.new-version.outputs.new-version }}
+          
+          ### Commits included:
+          ${{ github.event.head_commit.message }}
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.get-latest-tag.outputs.latest-tag }}...${{ steps.new-version.outputs.new-version }}
+        draft: false
+        prerelease: false

@@ -1,0 +1,51 @@
+name: Semantic Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Bump version and push tag
+      id: tag_version
+      uses: mathieudutour/github-tag-action@v6.2
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        default_bump: patch
+        release_branches: main
+        pre_release_branches: develop,beta
+        tag_prefix: v
+
+    - name: Create GitHub Release
+      if: steps.tag_version.outputs.new_tag
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag_version.outputs.new_tag }}
+        release_name: Release ${{ steps.tag_version.outputs.new_tag }}
+        body: |
+          ## 🚀 Release ${{ steps.tag_version.outputs.new_tag }}
+          
+          ### Changes in this release:
+          ${{ steps.tag_version.outputs.changelog }}
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.tag_version.outputs.previous_tag }}...${{ steps.tag_version.outputs.new_tag }}
+        draft: false
+        prerelease: false
+
+    - name: Output new version
+      if: steps.tag_version.outputs.new_tag
+      run: |
+        echo "🎉 New version tagged: ${{ steps.tag_version.outputs.new_tag }}"
+        echo "📝 Changelog: ${{ steps.tag_version.outputs.changelog }}"
