@@ -29,7 +29,7 @@ type Config struct {
 	ServiceName string // required
 	ServiceVer  string // optional
 	Environment string // "prod" | "staging" | "dev" | etc.
-
+	LogLevel    string // "debug" | "info" | "warn" | "error" | "fatal" | "panic"
 	// Optional tuning:
 	DialTimeout    time.Duration // default 10s
 	ExportInterval time.Duration // default 2s
@@ -69,6 +69,7 @@ func InitLogs(ctx context.Context, cfg Config) (func(context.Context) error, err
 			semconv.ServiceName(cfg.ServiceName),
 			semconv.ServiceVersion(cfg.ServiceVer),
 			attribute.String("deployment.environment", cfg.Environment),
+			attribute.String("deployment.log_level", cfg.LogLevel),
 		),
 	)
 	if err != nil {
@@ -145,6 +146,17 @@ func Warn(ctx context.Context, l otellog.Logger, msg string, attrs ...otellog.Ke
 	var r otellog.Record
 	r.SetTimestamp(time.Now())
 	r.SetSeverity(otellog.SeverityWarn)
+	r.SetBody(otellog.StringValue(msg))
+	for _, a := range attrs {
+		r.AddAttributes(a)
+	}
+	l.Emit(ctx, r)
+}
+
+func Debug(ctx context.Context, l otellog.Logger, msg string, attrs ...otellog.KeyValue) {
+	var r otellog.Record
+	r.SetTimestamp(time.Now())
+	r.SetSeverity(otellog.SeverityDebug)
 	r.SetBody(otellog.StringValue(msg))
 	for _, a := range attrs {
 		r.AddAttributes(a)
