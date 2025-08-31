@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	logexp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	otellog "go.opentelemetry.io/otel/log"
 	logglobal "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -30,6 +31,10 @@ type Config struct {
 	ServiceVer  string // optional
 	Environment string // "prod" | "staging" | "dev" | etc.
 	LogLevel    string // "debug" | "info" | "warn" | "error" | "fatal" | "panic"
+
+	// If true, also send logs to stdout (useful for local development)
+	EnableStdout bool
+
 	// Optional tuning:
 	DialTimeout    time.Duration // default 10s
 	ExportInterval time.Duration // default 2s
@@ -92,7 +97,8 @@ func InitLogs(ctx context.Context, cfg Config) (func(context.Context) error, err
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	exp, err := logexp.New(ctx,
+	// Create OTLP exporter
+	otlpExp, err := logexp.New(ctx,
 		logexp.WithEndpoint(cfg.Endpoint),
 		logexp.WithDialOption(dialOpts...),
 	)
@@ -100,15 +106,37 @@ func InitLogs(ctx context.Context, cfg Config) (func(context.Context) error, err
 		return nil, fmt.Errorf("otlp log exporter: %w", err)
 	}
 
-	bp := sdklog.NewBatchProcessor(exp,
+	// Create batch processor for OTLP
+	otlpProcessor := sdklog.NewBatchProcessor(otlpExp,
 		sdklog.WithExportInterval(cfg.ExportInterval),
 		sdklog.WithMaxQueueSize(cfg.MaxQueueSize),
 	)
 
-	lp := sdklog.NewLoggerProvider(
+	processors := []sdklog.Processor{otlpProcessor}
+
+	// Optionally add stdout exporter
+	if cfg.EnableStdout {
+		stdoutExp, err := stdoutlog.New(
+			stdoutlog.WithPrettyPrint(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("stdout log exporter: %w", err)
+		}
+
+		// Use simple processor for stdout (immediate output)
+		stdoutProcessor := sdklog.NewSimpleProcessor(stdoutExp)
+		processors = append(processors, stdoutProcessor)
+	}
+
+	// Create logger provider with all processors
+	lpOptions := []sdklog.LoggerProviderOption{
 		sdklog.WithResource(res),
-		sdklog.WithProcessor(bp),
-	)
+	}
+	for _, processor := range processors {
+		lpOptions = append(lpOptions, sdklog.WithProcessor(processor))
+	}
+
+	lp := sdklog.NewLoggerProvider(lpOptions...)
 	logglobal.SetLoggerProvider(lp)
 
 	return lp.Shutdown, nil
